@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  <entry>
+    <title><![CDATA[Nginx与安全有关的几个配置]]></title>
+    <url>%2F2019%2F06%2F23%2FNginx%E4%B8%8E%E5%AE%89%E5%85%A8%E6%9C%89%E5%85%B3%E7%9A%84%E5%87%A0%E4%B8%AA%E9%85%8D%E7%BD%AE%2F</url>
+    <content type="text"><![CDATA[转: 运维咖啡吧（微信号：ops-coffee），作者：37丫37 隐藏版本号123http &#123; server_tokens off;&#125; 开启HTTPS12345678910server &#123; listen 443; server_name ops-coffee.cn; ssl on; ssl_certificate /etc/nginx/server.crt; ssl_certificate_key /etc/nginx/server.key; ssl_protocols TLSv1 TLSv1.1 TLSv1.2; ssl_ciphers HIGH:!aNULL:!MD5;&#125; ssl on： 开启https ssl_certificate： 配置nginx ssl证书的路径 ssl_certificate_key： 配置nginx ssl证书key的路径 ssl_protocols： 指定客户端建立连接时使用的ssl协议版本，如果不需要兼容TSLv1，直接去掉即可 ssl_ciphers： 指定客户端连接时所使用的加密算法，你可以再这里配置更高安全的算法 添加黑白名单白名单配置 1234location /admin/ &#123; allow 192.168.1.0/24; deny all;&#125; 上边表示只允许192.168.1.0/24网段的主机访问，拒绝其他所有 也可以写成黑名单的方式禁止某些地址访问，允许其他所有，例如 1234location /ops-coffee/ &#123; deny 192.168.1.0/24; allow all;&#125; 更多的时候客户端请求会经过层层代理，我们需要通过$http_x_forwarded_for来进行限制，可以这样写 1234set $allow false;if ($http_x_forwarded_for = "211.144.204.2") &#123; set $allow true; &#125;if ($http_x_forwarded_for ~ "108.2.66.[89]") &#123; set $allow true; &#125;if ($allow = false) &#123; return 404; &#125; 限制请求方法123if ($request_method !~ ^(GET|POST)$ ) &#123; return 405;&#125; $request_method能够获取到请求nginx的method 配置只允许GET\POST方法访问，其他的method返回405 拒绝User-Agent123if ($http_user_agent ~* LWP::Simple|BBBike|wget|curl) &#123; return 444;&#125; 可能有一些不法者会利用wget/curl等工具扫描我们的网站，我们可以通过禁止相应的user-agent来简单的防范 Nginx的444状态比较特殊，如果返回444那么客户端将不会收到服务端返回的信息，就像是网站无法连接一样 图片防盗链123456location /images/ &#123; valid_referers none blocked www.ops-coffee.cn ops-coffee.cn; if ($invalid_referer) &#123; return 403; &#125;&#125; valid_referers： 验证referer，其中none允许referer为空，blocked允许不带协议的请求，除了以上两类外仅允许referer为www.ops-coffee.cn或ops-coffee.cn时访问images下的图片资源，否则返回403 当然你也可以给不符合referer规则的请求重定向到一个默认的图片，比如下边这样 123456location /images/ &#123; valid_referers blocked www.ops-coffee.cn ops-coffee.cn if ($invalid_referer) &#123; rewrite ^/images/.*\.(gif|jpg|jpeg|png)$ /static/qrcode.jpg last; &#125;&#125; 控制并发连接数可以通过ngx_http_limit_conn_module模块限制一个IP的并发连接数 1234567891011121314151617http &#123; limit_conn_zone $binary_remote_addr zone=ops:10m; server &#123; listen 80; server_name ops-coffee.cn; root /home/project/webapp; index index.html; location / &#123; limit_conn ops 10; &#125; access_log /tmp/nginx_access.log main; &#125;&#125; limit_conn_zone： 设定保存各个键(例如$binary_remote_addr)状态的共享内存空间的参数，zone=空间名字:大小 大小的计算与变量有关，例如$binary_remote_addr变量的大小对于记录IPV4地址是固定的4 bytes，而记录IPV6地址时固定的16 bytes，存储状态在32位平台中占用32或者64 bytes，在64位平台中占用64 bytes。1m的共享内存空间可以保存大约3.2万个32位的状态，1.6万个64位的状态 limit_conn： 指定一块已经设定的共享内存空间(例如name为ops的空间)，以及每个给定键值的最大连接数 上边的例子表示同一IP同一时间只允许10个连接 当有多个limit_conn指令被配置时，所有的连接数限制都会生效 1234567891011121314151617http &#123; limit_conn_zone $binary_remote_addr zone=ops:10m; limit_conn_zone $server_name zone=coffee:10m; server &#123; listen 80; server_name ops-coffee.cn; root /home/project/webapp; index index.html; location / &#123; limit_conn ops 10; limit_conn coffee 2000; &#125; &#125;&#125; 上边的配置不仅会限制单一IP来源的连接数为10，同时也会限制单一虚拟服务器的总连接数为2000 缓冲区溢出攻击缓冲区溢出攻击 是通过将数据写入缓冲区并超出缓冲区边界和重写内存片段来实现的，限制缓冲区大小可有效防止 1234client_body_buffer_size 1K;client_header_buffer_size 1k;client_max_body_size 1k;large_client_header_buffers 2 1k; client_body_buffer_size： 默认8k或16k，表示客户端请求body占用缓冲区大小。如果连接请求超过缓存区指定的值，那么这些请求实体的整体或部分将尝试写入一个临时文件。 client_header_buffer_size： 表示客户端请求头部的缓冲区大小。绝大多数情况下一个请求头不会大于1k，不过如果有来自于wap客户端的较大的cookie它可能会大于 1k，Nginx将分配给它一个更大的缓冲区，这个值可以在large_client_header_buffers里面设置 client_max_body_size： 表示客户端请求的最大可接受body大小，它出现在请求头部的Content-Length字段， 如果请求大于指定的值，客户端将收到一个”Request Entity Too Large” (413)错误，通常在上传文件到服务器时会受到限制 large_client_header_buffers 表示一些比较大的请求头使用的缓冲区数量和大小，默认一个缓冲区大小为操作系统中分页文件大小，通常是4k或8k，请求字段不能大于一个缓冲区大小，如果客户端发送一个比较大的头，nginx将返回”Request URI too large” (414)，请求的头部最长字段不能大于一个缓冲区，否则服务器将返回”Bad request” (400) 同时需要修改几个超时时间的配置 1234client_body_timeout 10;client_header_timeout 10;keepalive_timeout 5 5;send_timeout 10; client_body_timeout： 表示读取请求body的超时时间，如果连接超过这个时间而客户端没有任何响应，Nginx将返回”Request time out” (408)错误 client_header_timeout： 表示读取客户端请求头的超时时间，如果连接超过这个时间而客户端没有任何响应，Nginx将返回”Request time out” (408)错误 keepalive_timeout： 参数的第一个值表示客户端与服务器长连接的超时时间，超过这个时间，服务器将关闭连接，可选的第二个参数参数表示Response头中Keep-Alive: timeout=time的time值，这个值可以使一些浏览器知道什么时候关闭连接，以便服务器不用重复关闭，如果不指定这个参数，nginx不会在应Response头中发送Keep-Alive信息 send_timeout： 表示发送给客户端应答后的超时时间，Timeout是指没有进入完整established状态，只完成了两次握手，如果超过这个时间客户端没有任何响应，nginx将关闭连接 Header头设置通过以下设置可有效防止XSS攻击 123add_header X-Frame-Options "SAMEORIGIN";add_header X-XSS-Protection "1; mode=block";add_header X-Content-Type-Options "nosniff"; X-Frame-Options： 响应头表示是否允许浏览器加载frame等属性，有三个配置DENY禁止任何网页被嵌入,SAMEORIGIN只允许本网站的嵌套,ALLOW-FROM允许指定地址的嵌套 X-XSS-Protection： 表示启用XSS过滤（禁用过滤为X-XSS-Protection: 0），mode=block表示若检查到XSS攻击则停止渲染页面 X-Content-Type-Options： 响应头用来指定浏览器对未指定或错误指定Content-Type资源真正类型的猜测行为，nosniff 表示不允许任何猜测 在通常的请求响应中，浏览器会根据Content-Type来分辨响应的类型，但当响应类型未指定或错误指定时，浏览会尝试启用MIME-sniffing来猜测资源的响应类型，这是非常危险的 例如一个.jpg的图片文件被恶意嵌入了可执行的js代码，在开启资源类型猜测的情况下，浏览器将执行嵌入的js代码，可能会有意想不到的后果 另外还有几个关于请求头的安全配置需要注意 Content-Security-Policy： 定义页面可以加载哪些资源， 1add_header Content-Security-Policy "default-src 'self'"; 上边的配置会限制所有的外部资源，都只能从当前域名加载，其中default-src定义针对所有类型资源的默认加载策略，self允许来自相同来源的内容 Strict-Transport-Security： 会告诉浏览器用HTTPS协议代替HTTP来访问目标站点 上边的配置表示当用户第一次访问后，会返回一个包含了Strict-Transport-Security响应头的字段，这个字段会告诉浏览器，在接下来的31536000秒内，当前网站的所有请求都使用https协议访问，参数includeSubDomains是可选的，表示所有子域名也将采用同样的规则]]></content>
+      <categories>
+        <category>服务器</category>
+      </categories>
+      <tags>
+        <tag>nginx</tag>
+        <tag>转载</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[git clean详解]]></title>
+    <url>%2F2019%2F04%2F17%2Fgit-clean%E8%AF%A6%E8%A7%A3%2F</url>
+    <content type="text"><![CDATA[git clean 参数 1234567-n 显示将要删除的文件和目录；-x -----删除忽略文件已经对git来说不识别的文件-d -----删除未被添加到git的路径中的文件-f -----强制运行 平时应用场景:切换分支时无法正常切换,需要清除临时更改的文件,使用git clean -d -f 还有一种丢弃变更的命令:git checkout .]]></content>
+      <categories>
+        <category>工具</category>
+      </categories>
+      <tags>
+        <tag>git</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[laravel-错误页返回json]]></title>
+    <url>%2F2019%2F03%2F25%2Flaravel-%E9%94%99%E8%AF%AF%E9%A1%B5%E8%BF%94%E5%9B%9Ejson%2F</url>
+    <content type="text"><![CDATA[实现效果debug=false的情况下,系统异常全部反馈json格式的错误信息.debug=true的情况下,正常显示. 实现代码修改 app/Exceptions/Handler.php 12345678910111213141516171819202122/** * Render an exception into an HTTP response. * * @param \Illuminate\Http\Request $request * @param \Exception $exception * * @return \Illuminate\Http\Response */public function render($request, Exception $exception)&#123; if ( config('app.debug') ) &#123; return parent::render($request, $exception); &#125; else &#123; $response = []; $error = $this-&gt;convertExceptionToResponse($exception); $response['errno'] = $error-&gt;getStatusCode(); $response['errmsg'] = 'something error'; $response['data'] = []; return response()-&gt;json($response, $error-&gt;getStatusCode()); &#125;&#125;]]></content>
+      <categories>
+        <category>Laravel</category>
+      </categories>
+      <tags>
+        <tag>laravel</tag>
+        <tag>php</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[laravel-日志(monolog)增加请求ID]]></title>
+    <url>%2F2019%2F03%2F24%2Flaravel-%E6%97%A5%E5%BF%97-monolog-%E5%A2%9E%E5%8A%A0%E8%AF%B7%E6%B1%82ID%2F</url>
+    <content type="text"><![CDATA[参考: https://blog.csdn.net/Webben/article/details/78834337 达到的效果 日志文件记录为{自定义名称}-年月日.log 日志中记录一次请求的ID,在本次请求过程中ID不变 实现方案config/app.php 增加配置 12// 日志文件名称'log_file_name' =&gt; 'laravel', config/app.php 内的 providers 增加配置 12// 增加日志IDApp\Providers\LogServiceProvider::class, app/Providers/LogServiceProvider.php 内容 123456789101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899100101102103104105106107108109110111112113114115116117118119120121122123124125126127128129130131132133134135136137138139&lt;?phpnamespace App\Providers;use Carbon\Carbon;use Illuminate\Support\ServiceProvider;use Monolog\Formatter\LineFormatter;use Monolog\Handler\RotatingFileHandler;use Monolog\Logger;class LogServiceProvider extends ServiceProvider&#123; protected $log_file; /** * Bootstrap any application services. * * @return void */ public function boot() &#123; // &#125; /** * Register any application services. * * @return void */ public function register() &#123; $this-&gt;loadRequestId(); /** * 根据日期来分割日志 */ $this-&gt;useDailyFiles(); &#125; /** * 生成log ID * * @auther flycmd * @date 2019-03-23 17:33 */ protected function loadRequestId() &#123; define('REQUEST_ID', config('app.log_prefix') . Carbon::now()-&gt;timestamp . mt_rand(10000, 99999)); &#125; /** * 根据日期来分割日志 */ protected function useDailyFiles() &#123; $handler = $this-&gt;getDailyHandler()-&gt;setFormatter($this-&gt;getDefaultFormatter()); $errorHandler = $this-&gt;getDailyHandler(Logger::ERROR)-&gt;setFormatter($this-&gt;getDefaultFormatter()); $this-&gt;app-&gt;configureMonologUsing(function ($monolog) use ($handler, $errorHandler) &#123; $monolog-&gt;pushHandler($handler); // 日志都记录到一个文件,不需要重复记录// $monolog-&gt;pushHandler($errorHandler); &#125;); &#125; /** * 设置 日志 行格式 * @return LineFormatter */ protected function getDefaultFormatter() &#123; $format = "[%datetime%] [" . REQUEST_ID . "] %channel%.%level_name%: %message% %context% %extra%\n"; return new LineFormatter($format, null, true, true); &#125; /** * 根据日志区分 * @return \Monolog\Handler\RotatingFileHandler */ protected function getDailyHandler($level = Logger::DEBUG) &#123; return new RotatingFileHandler( $this-&gt;logPath() . $this-&gt;logName(), $this-&gt;maxFiles(), $level ); &#125; /** * 日志文件最多个数 * @return int */ protected function maxFiles() &#123; if ( $this-&gt;app-&gt;bound('config') ) &#123; return $this-&gt;app-&gt;make('config')-&gt;get('app.log_max_files', 30); &#125; return 0; &#125; /** * 日志文件名称 * @return mixed */ protected function logPath() &#123; $logPath = $this-&gt;app-&gt;storagePath() . "/logs/"; if ( $this-&gt;app-&gt;bound('config') ) &#123; $logPath = $this-&gt;app-&gt;make('config')-&gt;get('app.log_path', $logPath); &#125; return $logPath; &#125; /** * log 完整文件名 * * @return string */ protected function logName() &#123; return $this-&gt;getLogFileName() . '.log'; &#125; /** * 获取日志名称 * @return string * * @auther flycmd * @date 2019-03-23 17:28 */ protected function getLogFileName() &#123; return $this-&gt;app-&gt;make('config')-&gt;get('get.log_file_name') ?: 'laravel'; &#125;&#125;]]></content>
+      <categories>
+        <category>Laravel</category>
+      </categories>
+      <tags>
+        <tag>laravel</tag>
+        <tag>php</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[laravel-辅助函数]]></title>
+    <url>%2F2019%2F02%2F23%2Flaravel-%E8%BE%85%E5%8A%A9%E5%87%BD%E6%95%B0%2F</url>
+    <content type="text"><![CDATA[把『自定义辅助函数』存放到bootstrap/helpers.php or app/helpers.php(这个没有看推荐和实际情况) 打开composer.json,找到autoload字段,修改为: 123456789101112&quot;autoload&quot;: &#123; &quot;classmap&quot;: [ &quot;database/seeds&quot;, &quot;database/factories&quot; ], &quot;psr-4&quot;: &#123; &quot;App\\&quot;: &quot;app/&quot; &#125;, &quot;files&quot;: [ &quot;bootstrap/helpers.php&quot; ]&#125;, 注意逗号不要多写或者漏写。 然后执行composer dumpautoload 执行php artisan tinker进入tinker 然后在tinker中即可使用helpers.php中的函数。 注：按 ctrl + d 退出 tinker 程序。]]></content>
+      <categories>
+        <category>笔记</category>
+        <category>Laravel</category>
+      </categories>
+      <tags>
+        <tag>laravel</tag>
+        <tag>php</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[laravel-项目创建]]></title>
+    <url>%2F2019%2F02%2F23%2Flaravel-%E9%A1%B9%E7%9B%AE%E5%88%9B%E5%BB%BA%2F</url>
+    <content type="text"><![CDATA[Composer加速composer config -g repo.packagist composer https://packagist.laravel-china.org 创建项目composer create-project laravel/laravel {项目名称} --prefer-dist &quot;5.7.*&quot; 配置.env123456789APP_NAME=&quot;项目名称&quot;...APP_URL=&#123;项目域名&#125;...DB_DATABASE=&#123;数据库名&#125; 如果环境变量的值中包含空格，需要用双引号将值包含起来]]></content>
+      <categories>
+        <category>笔记</category>
+        <category>Laravel</category>
+      </categories>
+      <tags>
+        <tag>laravel</tag>
+        <tag>php</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[使用openssl_encrypt方法替代mcrypt_encrypt做AES加密]]></title>
+    <url>%2F2019%2F02%2F16%2F%E4%BD%BF%E7%94%A8openssl-encrypt%E6%96%B9%E6%B3%95%E6%9B%BF%E4%BB%A3mcrypt-encrypt%E5%81%9AAES%E5%8A%A0%E5%AF%86%2F</url>
+    <content type="text"><![CDATA[最近接入某第三方支付的时候,碰到传输data数据需要进行aes加密，然后再进行签名传输,由于官方提供的sdk加密使用了mcrypt_encrypt在PHP7.1+版本被弃用,而生产环境是PHP7.2版本,故需要对官方sdk进行调整. 文档要求的加密具体内容: 签名使用sha1(40),md5(32)，数据加密使用AES。AES算法（加密算法：MCRYPT_RIJNDAEL_128，算法模式：MCRYPT_MODE_ECB，补码方式：PKCS5Padding）。数据加密密钥为open_keyAES密文使用2进制转16进制进行网络传输，不使用base64，请开发者注意。 官方提供的sdk加密 123456789101112public static function encrypt($input, $key) &#123; $size = mcrypt_get_block_size(MCRYPT_RIJNDAEL_128, MCRYPT_MODE_ECB); $input = self::pkcs5_pad($input, $size); $td = mcrypt_module_open(MCRYPT_RIJNDAEL_128, '', MCRYPT_MODE_ECB, ''); $iv = mcrypt_create_iv (mcrypt_enc_get_iv_size($td), MCRYPT_RAND); mcrypt_generic_init($td, $key, $iv); $data = mcrypt_generic($td, $input); mcrypt_generic_deinit($td); mcrypt_module_close($td); $data = strtoupper(bin2hex($data)); return $data;&#125; 经过搜索发现网络上提供的方案多是openssl_decrypt($str, &#39;AES-128-CBC&#39;, $encryptKey, 0, $localIV);等类似方案,尝试发现数据加密错误 解决思路分析网络上的解决方案发现大部分都是对openssl_decrypt的第二个参数进行更换,而且第二个参数是控制加密算法的,猜测是加密算法设置错了 使用官方提供的sdk在php5.6环境下生成一个加密串 使用openssl_get_cipher_methods()获取所有可用的加密算法(参考文档 http://php.net/manual/zh/function.openssl-decrypt.php) 使用相同的数据遍历加密算法,找到和官方sdk一致的加密值 最终找到了使用的是aes-256-ecb加密算法 最终方案加密123456public static function encrypt($input, $key) &#123; $encrypted = openssl_encrypt($input, 'aes-256-ecb', $key, OPENSSL_RAW_DATA, ''); $encrypt_msg = strtoupper(bin2hex($encrypted)); return $encrypt_msg;&#125; 解密12345public static function decrypt($sStr, $sKey) &#123; $decrypted = openssl_decrypt(hex2bin($sStr), 'aes-256-ecb', $sKey, OPENSSL_RAW_DATA); return $decrypted;&#125;]]></content>
+      <categories>
+        <category>代码</category>
+        <category>PHP</category>
+      </categories>
+      <tags>
+        <tag>PHP</tag>
+        <tag>代码</tag>
+        <tag>AES</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[算法-两数之和]]></title>
+    <url>%2F2019%2F02%2F11%2F%E7%AE%97%E6%B3%95-%E4%B8%A4%E6%95%B0%E4%B9%8B%E5%92%8C%2F</url>
+    <content type="text"><![CDATA[给定一个整数数组 nums 和一个目标值 target，请你在该数组中找出和为目标值的那 两个 整数，并返回他们的数组下标。 你可以假设每种输入只会对应一个答案。但是，你不能重复利用这个数组中同样的元素。 示例: 给定 nums = [2, 7, 11, 15], target = 9因为 nums[0] + nums[1] = 2 + 7 = 9所以返回 [0, 1] 穷举法 时间复杂度:O(n ^ 2) | 空间复杂度:O(1)1234567891011121314151617181920212223242526272829303132333435class Solution &#123; function twoSum($nums, $target) &#123; // 生序排列数组 $length = count($nums); if ($length&lt;= 1) &#123; return [0,0]; &#125; if ($length === 2) &#123; if ($nums[0]+$nums[1] !== $target) &#123; return [0,0]; &#125;else &#123; return [0,1]; &#125; &#125; 穷举法 时间复杂度:O(n ^ 2) | 空间复杂度:O(1) for ($i=0; $i &lt; $length; $i++) &#123; for ($j=$i+1; $j &lt; $length; $j++) &#123; if ($nums[$i] + $nums[$j] == $target) &#123; return [ $i =&gt; $nums[$i], $j =&gt; $nums[$j], ]; &#125; &#125; &#125; // 没有匹配到 return [0,0]; &#125;&#125;print_r((new Solution)-&gt;twoSum([3,7,4,2],6)); 此种方式改变了数组下标,无法完成目标答案,如果只取值是我可以想到的最优解时间复杂度:O(n) 123456789101112131415161718192021222324252627282930313233343536373839class Solution &#123; function twoSum($nums, $target) &#123; // 生序排列数组 $length = count($nums); if ($length&lt;= 1) &#123; return [0,0]; &#125; if ($length === 2) &#123; if ($nums[0]+$nums[1] !== $target) &#123; return [0,0]; &#125;else &#123; return [0,1]; &#125; &#125; sort($nums); for ($i=0,$j = $length-1; $i &lt; $j;) &#123; if ($nums[$i]+$nums[$j] == $target) &#123; return [ $i =&gt; $nums[$i], $j =&gt; $nums[$j], ]; &#125;elseif ($nums[$i]+$nums[$j]&lt;$target) &#123; // 相加小于目标值,头指针+1 $i++; &#125;else &#123; // 相加大于目标值,尾指针减1 $j--; &#125; &#125; // 没有匹配到 return [0,0]; &#125;&#125;print_r((new Solution)-&gt;twoSum([3,7,4,2],6)); 此种方案在整个数组中查询应该会比较慢12345678910111213141516171819202122232425262728293031323334353637383940414243444546474849class Solution &#123; function twoSum($nums, $target) &#123; // 生序排列数组 $length = count($nums); if ($length&lt;= 1) &#123; return [0,0]; &#125; if ($length === 2) &#123; if ($nums[0]+$nums[1] !== $target) &#123; return [0,0]; &#125;else &#123; return [0,1]; &#125; &#125; for ($i=0; $i &lt; $length-1; $i++) &#123; // 计算另一半的值 $complement = $target - $nums[$i]; // 获取另一半值的下标 $keys = array_keys($nums,$complement); // 下标存在一个且和当前目标值不相同 if (count($keys) == 1 &amp;&amp; $keys[0] !== $i) &#123; return [ $i, $keys[0] ]; &#125; // 下标存在多个,返回一个和目标值不相同的 if (count($keys) &gt; 1) &#123; // 移除当前的key if (array_search($i, $keys) !== false) &#123; unset($keys[array_search($i, $keys)]); return ([$i,array_pop($keys)]); &#125; &#125; &#125; // 没有匹配到 return [0,0]; &#125;&#125;print_r((new Solution)-&gt;twoSum([3,7,4,2],6)); 通过临时空间进行匹配12345678910111213141516class Solution &#123; function twoSum($nums, $target) &#123; $temp = array(); foreach($nums as $k=&gt;$v)&#123; if(isset($temp[$target-$v]) &amp;&amp; $k != $temp[$target-$v])&#123; return array($k, $temp[$target-$v]); &#125; $temp[$v] = $k; &#125; // 没有匹配到 return [0,0]; &#125;&#125;print_r((new Solution)-&gt;twoSum([3,7,4,2],6));]]></content>
+      <categories>
+        <category>算法</category>
+      </categories>
+      <tags>
+        <tag>PHP</tag>
+        <tag>算法</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[PHP 开发者容易犯的错误]]></title>
+    <url>%2F2019%2F02%2F04%2FPHP%E5%BC%80%E5%8F%91%E8%80%85%E5%AE%B9%E6%98%93%E7%8A%AF%E7%9A%84%E9%94%99%E8%AF%AF%2F</url>
+    <content type="text"><![CDATA[在foreach循环后留下数组的引用在 foreach 循环中使用引用 12345$arr = array(1, 2, 3, 4);foreach ($arr as &amp;$value) &#123; $value = $value * 2;&#125;// $arr 现在是 array(2, 4, 6, 8) 在上述例子，在代码执行完以后，$value仍保留在作用域内，并保留着对数组最后一个元素的引用。之后与$value相关的操作会无意中修改数组中最后一个元素的值。 你要记住 foreach 并不会产生一个块级作用域。因此，在上面例子中 $value 是一个全局引用变量。在 foreach 遍历中，每一次迭代都会形成一个对 $arr 下一个元素的引用。当遍历结束后， $value 会引用 $arr 的最后一个元素，并保留在作用域中 12345678$array = [1, 2, 3];echo implode(',', $array), "\n";foreach ($array as &amp;$value) &#123;&#125; // 通过引用遍历echo implode(',', $array), "\n";foreach ($array as $value) &#123;&#125; // 通过赋值遍历echo implode(',', $array), "\n"; 以上代码会输出 1231,2,31,2,31,2,2 最后一行的最后一个值是 2 ，而不是 3 ，为什么？ 在完成第一个 foreach 遍历后， $array 并没有改变，但是像上述解释的那样， $value 留下了一个对 $array 最后一个元素的危险的引用（因为 foreach 通过引用获得 $value ） 这导致当运行到第二个 foreach ，这个”奇怪的东西”发生了。当 $value 通过赋值获得， foreach 按顺序复制每个 $array 的元素到 $value 时，第二个 foreach 里面的细节是这样的 第一步：复制 $array[0] （也就是 1 ）到 $value （$value 其实是 $array最后一个元素的引用，即 $array[2]），所以 $array[2] 现在等于 1。所以 $array 现在包含 [1, 2, 1] 第二步：复制 $array[1]（也就是 2 ）到 $value （ $array[2] 的引用），所以 $array[2] 现在等于 2。所以 $array 现在包含 [1, 2, 2] 第三步：复制 $array[2]（现在等于 2 ） 到 $value（ $array[2] 的引用），所以 $array[2] 现在等于 2 。所以 $array 现在包含 [1, 2, 2] 为了在 foreach 中方便的使用引用而免遭这种麻烦，请在 foreach 执行完毕后 unset() 掉这个保留着引用的变量。例如 12345$arr = array(1, 2, 3, 4);foreach ($arr as &amp;$value) &#123; $value = $value * 2;&#125;unset($value); // $value 不再引用 $arr[3]]]></content>
+      <categories>
+        <category>编程</category>
+        <category>PHP</category>
+      </categories>
+      <tags>
+        <tag>PHP</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[Mac连接samba]]></title>
+    <url>%2F2019%2F02%2F01%2FMac%E8%BF%9E%E6%8E%A5samba%2F</url>
+    <content type="text"><![CDATA[连接打开Finder（或在桌面），CMD + k 输入服务器地址 .DS_Store处理让Finder不在远程连接时产生.DS_Store defaults write com.apple.desktopservices DSDontWriteNetworkStores true]]></content>
+      <categories>
+        <category>系统</category>
+      </categories>
+      <tags>
+        <tag>mac</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[nginx泛域名解析]]></title>
+    <url>%2F2019%2F01%2F27%2Fnginx%E6%B3%9B%E5%9F%9F%E5%90%8D%E8%A7%A3%E6%9E%90%2F</url>
+    <content type="text"><![CDATA[可能用到的场景:个性化域名 配置方法:12345678910# 以通配符*开始的字符串server_name *.yourdomain.com;# 以通配符*结束的字符串server_name www.*;# 配置正则表达式server_name ~^(?.+)\.yourdomain\.com$;## $subdomain表示匹配到的二级域名server_name ~^(?&lt;subdomain&gt;.+)\.yourdomain\.com$; 配置案例 - 1123456789server &#123; listen 80; server_name ~^(?&lt;subdomain&gt;.+).\yourdomain\.com$; index index.html index.htm index.php; root /home/wwwroot/$subdomain/; ...&#125; 配置案例 - 2123456789101112131415161718erver &#123; listen 80; server_name *.yourdomain.com; index index.html index.htm index.php; if ($host ~* ^([^\.]+)\.([^\.]+\.[^\.]+)$) &#123; set $subdomain $1; set $domain $2; &#125; location / &#123; root /home/wwwroot/$subdomain/; index index.php index.html index.htm; &#125; ...&#125; 配置案例 - 3 (nginx将泛解析的匹配域名绑定到子目录的配置方法如下)123456789101112131415161718192021222324server &#123; listen 80; server_name domain.com *.domain.com; if ($host ~* ^([^\.]+)\.([^\.]+\.[^\.]+)$) &#123; set $subdomain $1; set $domain $2; &#125; location / &#123; root /home/wwwroot/$domain/$subdomain/; index index.php index.html index.htm; &#125; location ~ \.php$ &#123; root /home/wwwroot/$domain/$subdomain/; fastcgi_pass 127.0.0.1:9100; fastcgi_index index.php; fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name; include fastcgi_params; &#125; ... &#125; 配置案例 - 4 (绑定子域名到统一目录，作为用户个性域名)1234567891011server &#123; listen 80; server_name yourdomain.com www.yourdomain.cpm ~^(?&lt;subdomain&gt;.+)\.m\.yourdomain\.com$; index index.php index.html index.htm; set $root_path &apos;/var/www/test&apos;; root $root_path; ...&#125; 实现效果:user.m.yourdomain.com 跳转到用户自己页面 配置案例 - 5 (绑定子域名到不同目录（子站）)html├── bbs└── www 12345678server &#123; listen 80; server_name ~^(?&lt;subdomain&gt;.+)\.yourdomain\.com$; root html/$subdomain; index index.html index.htm index.php; ...&#125; html为nginx的安装目录下默认的存放源代码的路径。 bbs为论坛程序源代码路径 www为主页程序源代码路径 把相应程序放入上面的路径通过 http://www.youdomain.com 访问的就是主页 http://bbs.yourdomain.com 访问的就是论坛 其它二级域名类推。]]></content>
+      <categories>
+        <category>服务器</category>
+      </categories>
+      <tags>
+        <tag>nginx</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[网络时代如何学习？]]></title>
+    <url>%2F2019%2F01%2F20%2F%E7%BD%91%E7%BB%9C%E6%97%B6%E4%BB%A3%E5%A6%82%E4%BD%95%E5%AD%A6%E4%B9%A0%EF%BC%9F%2F</url>
+    <content type="text"><![CDATA[文章地址:https://zhuanlan.zhihu.com/p/38479764 最基本的底线是要明白“实践”的重要性，并且亲身上阵去实践。 在实际操作中，我们要有意识地对网络上的知识进行取舍，以节省时间和精力，然后对最重要的知识进行不断的实践。 具体方法是：拒绝被动输入知识，按需主动查找知识。 拒绝被动输入知识，指的是拒绝接受知识类APP没完没了的推送。APP做出来是需要流量盈利的。它们要么卖你东西，要么插播广告，因此推送的多是些吸引眼球的趣味知识，少有高质量的干货。偶尔推送一些干货，也不一定是你当前最需要的。这些低质量的或者不相关的知识如果输入太多，就会在无形之中不知不觉地消耗了你的时间和注意力，让你不能专注于学习实践对你来说最重要的知识。按需主动查找知识，指的是在需要解决问题的时候去主动查找知识。这样做能保证知识和你目前面临的问题高度相关，也让你在查找的过程中通过比较筛选出质量高的干货来学习。更重要的是，由于你查找知识是为了解决当前面临的问题，所以在学到知识以后会马上实践，如此一来知识学习和行动反馈就能双管齐下、相得益彰。 总之，珍惜自己的时间和注意力，拒绝被动的知识接收，思考自己真正需要什么，按需查找对你来说重要而紧急的知识和信息。这样不仅能解决你面临的问题，还能通过实践得到第一手经验，进一步加深你对知识的理解，是一箭双雕，更是从“知识焦虑”和“虚假自信”中解放自我，做知识和生活的主人。]]></content>
+      <categories>
+        <category>其他</category>
+      </categories>
+      <tags>
+        <tag>解决方案</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[PHP命令行]]></title>
+    <url>%2F2019%2F01%2F02%2FPHP%E5%91%BD%E4%BB%A4%E8%A1%8C%2F</url>
+    <content type="text"><![CDATA[php命令行(CLI)参数详解1234567891011121314151617181920212223242526272829303132333435363738394041Usage: php [options] [-f] &lt;file&gt; [--] [args...] php [options] -r &lt;code&gt; [--] [args...] php [options] [-B &lt;begin_code&gt;] -R &lt;code&gt; [-E &lt;end_code&gt;] [--] [args...] php [options] [-B &lt;begin_code&gt;] -F &lt;file&gt; [-E &lt;end_code&gt;] [--] [args...] php [options] -S &lt;addr&gt;:&lt;port&gt; [-t docroot] [router] php [options] -- [args...] php [options] -a -a Run as interactive shell-c &lt;path&gt;|&lt;file&gt; Look for php.ini file in this directory-n No configuration (ini) files will be used-d foo[=bar] Define INI entry foo with value &apos;bar&apos;-e Generate extended information for debugger/profiler-f &lt;file&gt; Parse and execute &lt;file&gt;.-h This help-i PHP information-l Syntax check only (lint)-m Show compiled in modules-r &lt;code&gt; Run PHP &lt;code&gt; without using script tags &lt;?..?&gt;-B &lt;begin_code&gt; Run PHP &lt;begin_code&gt; before processing input lines-R &lt;code&gt; Run PHP &lt;code&gt; for every input line-F &lt;file&gt; Parse and execute &lt;file&gt; for every input line-E &lt;end_code&gt; Run PHP &lt;end_code&gt; after processing all input lines-H Hide any passed arguments from external tools.-S &lt;addr&gt;:&lt;port&gt; Run with built-in web server.-t &lt;docroot&gt; Specify document root &lt;docroot&gt; for built-in web server.-s Output HTML syntax highlighted source.-v Version number-w Output source with stripped comments and whitespace.-z &lt;file&gt; Load Zend extension &lt;file&gt;.args... Arguments passed to script. Use -- args when first argument starts with - or script is read from stdin--ini Show configuration file names--rf &lt;name&gt; Show information about function &lt;name&gt;.--rc &lt;name&gt; Show information about class &lt;name&gt;.--re &lt;name&gt; Show information about extension &lt;name&gt;.--rz &lt;name&gt; Show information about Zend extension &lt;name&gt;.--ri &lt;name&gt; Show configuration for extension &lt;name&gt;. 以交互式shell的方式运行PHP1php -a 运行内建的Web服务器默认以当前目录为工作目录 1php -S localhost:8000 使用-t参数指定其它的目录作为工作目录 官方文档 查找PHP的配置文件1php --ini 可以列出当前PHP的配置文件信息 查看类/函数/扩展信息1php --info 可以配合grep使用 我们可以使用下列参数更加方便的查看这些信息 12345--rf 显示关于函数 的信息.--rc 显示关于类 的信息.--re 显示关于扩展 的信息.--rz 显示关于Zend扩展 的信息.--ri 显示扩展 的配置信息. 12345678# 查看扩展redis的配置信息php --ri redis# 查看redis类的信息php --rc redis# 查看函数printf的信息php --rf printf 语法检查1php -l index.php 有错误的情况 12345$ php -l index.phpPHP Parse error: syntax error, unexpected &apos;echo&apos; (T_ECHO) in index.php on line 3 Parse error: syntax error, unexpected &apos;echo&apos; (T_ECHO) in index.php on line 3Errors parsing index.php]]></content>
+      <categories>
+        <category>编程</category>
+        <category>PHP</category>
+      </categories>
+      <tags>
+        <tag>PHP</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[PHP中array_merge和array相加的区别分析]]></title>
+    <url>%2F2018%2F11%2F23%2FPHP%E4%B8%ADarray-merge%E5%92%8Carray%E7%9B%B8%E5%8A%A0%E7%9A%84%E5%8C%BA%E5%88%AB%E5%88%86%E6%9E%90%2F</url>
+    <content type="text"><![CDATA[键名是string123456789&lt;?php$arr1 = array('a'=&gt;'PHP');$arr2 = array('a'=&gt;'JAVA');//如果键名为字符，且键名相同，array_merge()后面数组元素值会覆盖前面数组元素值print_r(array_merge($arr1,$arr2)); //Array ( [a] =&gt; JAVA )//如果键名为字符，且键名相同，数组相加会将最先出现的值作为结果print_r($arr1+$arr2); //Array ( [a] =&gt; PHP ) 键名是数字123456789&lt;?php$arr1 = array("C","PHP");$arr2 = array("JAVA","PHP");//如果键名为数字，array_merge()不会进行覆盖print_r(array_merge($arr1,$arr2));//Array ( [0] =&gt; C [1] =&gt; PHP [2] =&gt; JAVA [3] =&gt; PHP )//如果键名为数组，数组相加会将最先出现的值作为结果，后面键名相同的会被抛弃print_r($arr1+$arr2);//Array ( [0] =&gt; C [1] =&gt; PHP ) 如何最有效的获取字符键名相同值不同的两个数组值集合array_merge_recursive — 递归地合并一个或多个数组，如果输入的数组中有相同的字符串键名，则这些值会被合并到一个数组中去。如下例： 1234&lt;?php$arr1 = array("a"=&gt;"php","c");$arr2 = array("a"=&gt;"java","c","ruby");print_r(array_merge_recursive($arr1, $arr2)); 结果如下： 1234567891011Array( [a] =&gt; Array ( [0] =&gt; php [1] =&gt; java ) [0] =&gt; c [1] =&gt; c [2] =&gt; ruby) 这样，就可以获取多个数组中键名相同的元素值集合了。]]></content>
+      <categories>
+        <category>编程</category>
+        <category>PHP</category>
+      </categories>
+      <tags>
+        <tag>PHP</tag>
+        <tag>数组</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[MySQL统计一个列中不同值的数量]]></title>
+    <url>%2F2018%2F09%2F06%2FMySQL%E7%BB%9F%E8%AE%A1%E4%B8%80%E4%B8%AA%E5%88%97%E4%B8%AD%E4%B8%8D%E5%90%8C%E5%80%BC%E7%9A%84%E6%95%B0%E9%87%8F%2F</url>
+    <content type="text"><![CDATA[需求: 我们存在一个用户来源表，用来标记用户从哪个渠道注册进来。 其中 origin 是用户来源，其中的值有 iPhone 、Android 、Web 三种，现在需要分别统计由这三种渠道注册的用户数量。 解决方案1123SELECT count(*) FROM user_operation_log WHERE origin = &apos;iPhone&apos;; 123SELECT count(*) FROM user_operation_log WHERE origin = &apos;Android&apos;; 123SELECT count(*) FROM user_operation_log WHERE origin = &apos;Web&apos;; 缺点是有多少条件就需要查询多少次,比较繁琐. 解决方案2我们知道 count 不仅可以用来统计行数，也能统计列值的数量，例如： 统计 user_operation_log 有多少行：SELECT count(*) FROM user_operation_log 统计 origin 这列值不为 NULL 的数量：SELECT count(origin) FROM user_operation_log 所以我们可以利用这个特性来实现上面的需求 第一种写法（用 count 实现）12345SELECT count(origin = &apos;iPhone&apos; OR NULL) AS iPhone, count(origin = &apos;Android&apos; OR NULL) AS Android, count(origin = &apos;Web&apos; OR NULL) AS Web FROM user_operation_log; 第二种写法（用 sum 实现）12345SELECT sum(if(origin = &apos;iPhone&apos;, 1, 0)) AS iPhone, sum(if(origin = &apos;Android&apos;, 1, 0)) AS Android, sum(if(origin = &apos;Web&apos;, 1, 0)) AS Web FROM user_operation_log; 12345SELECT sum(origin = &apos;iPhone&apos;) AS iPhone, sum(origin = &apos;Android&apos;) AS Android, sum(origin = &apos;Web&apos;) AS Web FROM user_operation_log; 最后一种(最优,需要看是否要统计所有类型的)1SELECT origin,count(*) num FROM user_operation_log GROUP BY origin;]]></content>
+      <categories>
+        <category>数据库</category>
+      </categories>
+      <tags>
+        <tag>mysql</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[Linux/Mac命令]]></title>
+    <url>%2F2018%2F09%2F03%2FLinux-Mac%E5%91%BD%E4%BB%A4%2F</url>
+    <content type="text"><![CDATA[遍历显示指定目录下的所有文件绝对路径显示 find $PWD -type f 相对路径显示 find . -type f 遍历文件和目录(含隐藏的)find $PWD | xargs ls -Rl]]></content>
+      <categories>
+        <category>系统</category>
+      </categories>
+      <tags>
+        <tag>linux</tag>
+        <tag>mac</tag>
+        <tag>命令</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[PHP 去掉url指定参数]]></title>
+    <url>%2F2018%2F08%2F28%2FPHP-%E5%8E%BB%E6%8E%89url%E6%8C%87%E5%AE%9A%E5%8F%82%E6%95%B0%2F</url>
+    <content type="text"><![CDATA[12345678910111213141516171819202122232425262728293031323334353637/** * 去掉URL中指定的参数, 删除无用参数 * * @param array|string $paramNames 要移除的参数 * @param string $url 要处理的地址 * * @return string */function removeUrlParam($paramNames, $url)&#123; if ( is_string($paramNames) ) &#123; $paramNames = array($paramNames); &#125; if ( !$paramNames ) &#123; return $url; &#125; $names = array(); if ( strpos($url, "?") !== false ) &#123; $urlInfo = explode("?", $url); $baseUrl = $urlInfo[1]; parse_str($baseUrl, $names); &#125; else &#123; return $url; &#125; foreach ($names as $name =&gt; $v) &#123; if ( in_array($name, $paramNames) ) &#123; unset($names[$name]); &#125; &#125; return $urlInfo[0] . "?" . http_build_query($names);&#125;// 测试removeUrlParam('b', 'https://xxx.com?a=1&amp;b=2');]]></content>
+      <categories>
+        <category>代码</category>
+        <category>PHP</category>
+      </categories>
+      <tags>
+        <tag>PHP</tag>
+        <tag>代码</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[Mysql查看版本号]]></title>
+    <url>%2F2018%2F08%2F28%2FMysql%E6%9F%A5%E7%9C%8B%E7%89%88%E6%9C%AC%E5%8F%B7%2F</url>
+    <content type="text"><![CDATA[1. 使用命令行模式进入mysql会看到最开始的提示符12Your MySQL connection id is 3 Server version: 5.1.69 Source distribution 2. 命令行中使用status可以看到1234567891011121314151617181920mysql&gt; status; -------------- mysql Ver 14.14 Distrib 5.1.69, for redhat-linux-gnu (x86_64) using readline 5.1 Connection id:3 Current database: Current user: root@localhost SSL: Not in use Current pager:stdout Using outfile:&apos;&apos; Using delimiter:; Server version:5.1.69 Source distribution Protocol version:10 Connection: Localhost via UNIX socket Server characterset:utf8 Db characterset:utf8 Client characterset:utf8 Conn. characterset:utf8 UNIX socket: /var/lib/mysql/mysql.sock Uptime: 3 days 14 hours 50 sec Threads: 1 Questions: 5 Slow queries: 0 Opens: 15 Flush tables: 1 Open tables: 8 Queries per second avg: 0.0 3. 使用系统函数1234567mysql&gt; select version(); +-----------+ | version() | +-----------+ | 5.1.69 | +-----------+ 1 row in set (0.12 sec) 4. $ mysql –help | grep Distrib1mysql Ver 14.14 Distrib 5.1.69, for redhat-linux-gnu (x86_64) using readline 5.1]]></content>
+      <categories>
+        <category>数据库</category>
+      </categories>
+      <tags>
+        <tag>mysql</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[Docker Compose：链接外部容器的几种方式]]></title>
+    <url>%2F2018%2F08%2F28%2FDocker-Compose%EF%BC%9A%E9%93%BE%E6%8E%A5%E5%A4%96%E9%83%A8%E5%AE%B9%E5%99%A8%E7%9A%84%E5%87%A0%E7%A7%8D%E6%96%B9%E5%BC%8F%2F</url>
+    <content type="text"><![CDATA[来源：【夏末】 https://notes.wanghao.work/2017-06-12-Docker-Compose-链接外部容器的几种方式.html 在Docker中，容器之间的链接是一种很常见的操作：它提供了访问其中的某个容器的网络服务而不需要将所需的端口暴露给Docker Host主机的功能。Docker Compose中对该特性的支持同样是很方便的。然而，如果需要链接的容器没有定义在同一个docker-compose.yml中的时候，这个时候就稍微麻烦复杂了点。 在不使用Docker Compose的时候，将两个容器链接起来使用—link参数，相对来说比较简单，以nginx镜像为例子： 12docker run --rm --name test1 -d nginx #开启一个实例test1docker run --rm --name test2 --link test1 -d nginx #开启一个实例test2并与test1建立链接 这样，test2与test1便建立了链接，就可以在test2中使用访问test1中的服务了。 如果使用Docker Compose，那么这个事情就更简单了，还是以上面的nginx镜像为例子，编辑docker-compose.yml文件为： 12345678910version: "3"services: test2: image: nginx depends_on: - test1 links: - test1 test1: image: nginx 最终效果与使用普通的Docker命令docker run xxxx建立的链接并无区别。这只是一种最为理想的情况。 如果容器没有定义在同一个docker-compose.yml文件中，应该如何链接它们呢？ 又如果定义在docker-compose.yml文件中的容器需要与docker run xxx启动的容器链接，需要如何处理？ 针对这两种典型的情况，下面给出我个人测试可行的办法： 方式一：让需要链接的容器同属一个外部网络我们还是使用nginx镜像来模拟这样的一个情景：假设我们需要将两个使用Docker Compose管理的nignx容器（test1和test2）链接起来，使得test2能够访问test1中提供的服务，这里我们以能ping通为准。 首先，我们定义容器test1的docker-compose.yml文件内容为： 1234567891011version: "3"services: test2: image: nginx container_name: test1 networks: - default - app_netnetworks: app_net: external: true test2的docker-compose.yml和test1的定义完全一致 正如你看到的那样，这里两个容器的定义里都使用了同一个外部网络app_net,因此，我们需要在启动这两个容器之前通过以下命令再创建外部网络： 1docker network create app_net 之后，通过docker-compose up -d命令启动这两个容器，然后执行docker exec -it test2 ping test1,你将会看到如下的输出： 12345678docker exec -it test2 ping test1PING test1 (172.18.0.2): 56 data bytes64 bytes from 172.18.0.2: icmp_seq=0 ttl=64 time=0.091 ms64 bytes from 172.18.0.2: icmp_seq=1 ttl=64 time=0.146 ms64 bytes from 172.18.0.2: icmp_seq=2 ttl=64 time=0.150 ms64 bytes from 172.18.0.2: icmp_seq=3 ttl=64 time=0.145 ms64 bytes from 172.18.0.2: icmp_seq=4 ttl=64 time=0.126 ms64 bytes from 172.18.0.2: icmp_seq=5 ttl=64 time=0.147 ms 证明这两个容器是成功链接了，反过来在test1中pingtest2也是能够正常ping通的。 如果我们通过docker run --rm --name test3 -d nginx这种方式来先启动了一个容器(test3)并且没有指定它所属的外部网络，而需要将其与test1或者test2链接的话，这个时候手动链接外部网络即可： 1docker network connect app_net test3 这样，三个容器都可以相互访问了。 方式二：更改需要链接的容器的网络模式通过更改你想要相互链接的容器的网络模式为bridge,并指定需要链接的外部容器（external_links)即可。与同属外部网络的容器可以相互访问的链接方式一不同，这种方式的访问是单向的。 还是以nginx容器镜像为例子，如果容器实例nginx1需要访问容器实例nginx2，那么nginx2的docker-compose.yml定义为： 123456version: "3"services: nginx2: image: nginx container_name: nginx2 network_mode: bridge 与其对应的，nginx1的docker-compose.yml定义为： 12345678version: "3"services: nginx1: image: nginx external_links: - nginx2 container_name: nginx1 network_mode: bridge 需要特别说明的是，这里的external_links是不能省略的，而且nginx1的启动必须要在nginx2之后，否则可能会报找不到容器nginx2的错误。 接着我们使用ping来测试下连通性： 12345678$ docker exec -it nginx1 ping nginx2 # nginx1 to nginx2PING nginx2 (172.17.0.4): 56 data bytes64 bytes from 172.17.0.4: icmp_seq=0 ttl=64 time=0.141 ms64 bytes from 172.17.0.4: icmp_seq=1 ttl=64 time=0.139 ms64 bytes from 172.17.0.4: icmp_seq=2 ttl=64 time=0.145 ms$ docker exec -it nginx2 ping nginx1 #nginx2 to nginx1ping: unknown host 以上也能充分证明这种方式是属于单向联通的。 在实际应用中根据自己的需要灵活的选择这两种链接方式，如果想偷懒的话，大可选择第二种。不过我更推荐第一种，不难看出无论是联通性还是灵活性，较为更改网络模式的第二种都更为友好。]]></content>
+      <categories>
+        <category>工具</category>
+      </categories>
+      <tags>
+        <tag>docker</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[Alfred同步配置信息]]></title>
+    <url>%2F2018%2F08%2F28%2FAlfred%E5%90%8C%E6%AD%A5%E9%85%8D%E7%BD%AE%E4%BF%A1%E6%81%AF%2F</url>
+    <content type="text"><![CDATA[手动同步直接备份 ~/Library/Application Support/Alfred 2/Alfred.alfredpreferences 目录,具体路径根据版本不同会有区别 自动同步(需要开启powerpack)在advanced选项卡下,点击set sync folder...按钮，设置同步目录存放位置即可.]]></content>
+      <categories>
+        <category>工具</category>
+      </categories>
+      <tags>
+        <tag>Alfred</tag>
+        <tag>mac工具</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[phpstorm使用教程]]></title>
+    <url>%2F2018%2F08%2F28%2Fphpstorm%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B%2F</url>
+    <content type="text"><![CDATA[常用快捷键 command+shift+O / command+P 快速打开文件 command+shift+A 快速搜索配置信息 command+control+M / command+F12 快速定位到方法 command+e 最近打开的文件列表 option+command+o 搜索项目中的类/方法并快速定位 control+t 重构(refactor this) control+G / command+D 快速选中多个变量进行多点编辑 command+control+G 一次性选中当前文件中所有变量进行多点编辑 control+option+o 移除无用的use command+option+shift+x ftp上传 更多快捷键https://laravel-china.org/topics/1692/how-to-use-phpstorm-gracefully]]></content>
+      <categories>
+        <category>工具</category>
+      </categories>
+      <tags>
+        <tag>PHPSTORM</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[微信授权和应用场景]]></title>
+    <url>%2F2018%2F08%2F27%2F%E5%BE%AE%E4%BF%A1%E6%8E%88%E6%9D%83%E5%92%8C%E5%BA%94%E7%94%A8%E5%9C%BA%E6%99%AF%2F</url>
+    <content type="text"><![CDATA[工具 &amp;&amp; 文档 微信公众平台接口测试帐号申请 微信网页授权文档 获取用户基本信息(UnionID机制) 授权方式 第一步：用户同意授权，获取code 第二步：通过code换取网页授权access_token 第三步：刷新access_token（如果需要） 第四步：拉取用户信息(需scope为 snsapi_userinfo). unionid 只有在用户将公众号绑定到微信开放平台帐号后，才会出现该字段。 附：检验授权凭证（access_token）是否有效 静默授权scope=snsapi_base （不弹出授权页面，直接跳转，只能获取用户openid） 可以获取到openid 弹授权窗口授权scope=snsapi_userinfo （弹出授权页面，可通过openid拿到昵称、性别、所在地。并且， 即使在未关注的情况下，只要用户授权，也能获取其信息 ） 可以获取到openid以及其他的基础信息 通过openid获取用户信息 需要用户关注公众号 通过openid和全局的access_token进行获取,详见 获取用户基本信息(UnionID机制). 应用场景需要获取用户信息的授权登录场景1:用户登录(每次都需要更新用户信息)先通过静默的方式获取openid并尝试获取用户信息,获取失败走弹窗授权流程,获取成功则继续走网站流程. 场景2:用户登录(不需要更新用户信息)先通过静默的方式获取openid,查询openid是否已存在,不存在则尝试获取用户信息,获取失败则转到弹出授权窗口的方式进行授权,然后注册登录. 已存在用户信息则直接登录. 仅需要openid场景1: 在公众号中使用非当前公众号发起支付,A 公众号授权;B 公众号 支付; 在发起支付之前,B公众号通过静默的方式获取用户openid(jssdk加密需要单独处理),然后绑定到当前登录的用户信息里,如果不绑定需要每次都获取.通过B公众号的openid发起支付即可. 获取用户基本信息(UnionID机制)场景1:判断用户是否已关注查询信息中 subscribe=0 标示未关注]]></content>
+      <categories>
+        <category>其他</category>
+      </categories>
+      <tags>
+        <tag>微信</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title><![CDATA[PHP RSA加密解密实例[转载]]]></title>
+    <url>%2F2018%2F03%2F19%2FPHP-RSA%E5%8A%A0%E5%AF%86%E8%A7%A3%E5%AF%86%E5%AE%9E%E4%BE%8B%2F</url>
+    <content type="text"><![CDATA[原始来源: http://blog.csdn.net/clh604/article/details/20224735 php服务端与客户端交互、提供开放api时，通常需要对敏感的部分api数据传输进行数据加密，这时候rsa非对称加密就能派上用处了，下面通过一个例子来说明如何用php来实现数据的加密解密 1、加密解密的第一步是生成公钥、私钥对，私钥加密的内容能通过公钥解密（反过来亦可以）下载开源RSA密钥生成工具openssl（通常Linux系统都自带该程序），解压缩至独立的文件夹，进入其中的bin目录，执行以下命令： 123openssl genrsa -out rsa_private_key.pem 1024openssl pkcs8 -topk8 -inform PEM -in rsa_private_key.pem -outform PEM -nocrypt -out private_key.pemopenssl rsa -in rsa_private_key.pem -pubout -out rsa_public_key.pem 第一条命令生成原始RSA私钥文件 rsa_private_key.pem 第二条命令将原始RSA私钥 转换为 pkcs8格式 第三条生成RSA公钥rsa_public_key.pem 从上面看出通过私钥能生成对应的公钥，因此我们将私钥private_key.pem用在服务器端，公钥发放给android跟ios等前端 2、php中用生成的公钥、私钥进行加密解密，直接上代码12345678910111213141516171819202122232425262728293031323334353637383940414243444546474849505152535455565758&lt;?php $private_key = '-----BEGIN RSA PRIVATE KEY----- MIICXQIBAAKBgQC3//sR2tXw0wrC2DySx8vNGlqt3Y7ldU9+LBLI6e1KS5lfc5jl TGF7KBTSkCHBM3ouEHWqp1ZJ85iJe59aF5gIB2klBd6h4wrbbHA2XE1sq21ykja/ Gqx7/IRia3zQfxGv/qEkyGOx+XALVoOlZqDwh76o2n1vP1D+tD3amHsK7QIDAQAB AoGBAKH14bMitESqD4PYwODWmy7rrrvyFPEnJJTECLjvKB7IkrVxVDkp1XiJnGKH 2h5syHQ5qslPSGYJ1M/XkDnGINwaLVHVD3BoKKgKg1bZn7ao5pXT+herqxaVwWs6 ga63yVSIC8jcODxiuvxJnUMQRLaqoF6aUb/2VWc2T5MDmxLhAkEA3pwGpvXgLiWL 3h7QLYZLrLrbFRuRN4CYl4UYaAKokkAvZly04Glle8ycgOc2DzL4eiL4l/+x/gaq deJU/cHLRQJBANOZY0mEoVkwhU4bScSdnfM6usQowYBEwHYYh/OTv1a3SqcCE1f+ qbAclCqeNiHajCcDmgYJ53LfIgyv0wCS54kCQAXaPkaHclRkQlAdqUV5IWYyJ25f oiq+Y8SgCCs73qixrU1YpJy9yKA/meG9smsl4Oh9IOIGI+zUygh9YdSmEq0CQQC2 4G3IP2G3lNDRdZIm5NZ7PfnmyRabxk/UgVUWdk47IwTZHFkdhxKfC8QepUhBsAHL QjifGXY4eJKUBm3FpDGJAkAFwUxYssiJjvrHwnHFbg0rFkvvY63OSmnRxiL4X6EY yI9lblCsyfpl25l7l5zmJrAHn45zAiOoBrWqpM5edu7c -----END RSA PRIVATE KEY-----'; $public_key = '-----BEGIN PUBLIC KEY----- MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3//sR2tXw0wrC2DySx8vNGlqt 3Y7ldU9+LBLI6e1KS5lfc5jlTGF7KBTSkCHBM3ouEHWqp1ZJ85iJe59aF5gIB2kl Bd6h4wrbbHA2XE1sq21ykja/Gqx7/IRia3zQfxGv/qEkyGOx+XALVoOlZqDwh76o 2n1vP1D+tD3amHsK7QIDAQAB -----END PUBLIC KEY-----'; //echo $private_key; $pi_key = openssl_pkey_get_private($private_key);//这个函数可用来判断私钥是否是可用的，可用返回资源id Resource id $pu_key = openssl_pkey_get_public($public_key);//这个函数可用来判断公钥是否是可用的 print_r($pi_key);echo "\n"; print_r($pu_key);echo "\n"; $data = "aassssasssddd";//原始数据 $encrypted = ""; $decrypted = ""; echo "source data:",$data,"\n"; echo "private key encrypt:\n"; openssl_private_encrypt($data,$encrypted,$pi_key);//私钥加密 $encrypted = base64_encode($encrypted);//加密后的内容通常含有特殊字符，需要编码转换下，在网络间通过url传输时要注意base64编码是否是url安全的 echo $encrypted,"\n"; echo "public key decrypt:\n"; openssl_public_decrypt(base64_decode($encrypted),$decrypted,$pu_key);//私钥加密的内容通过公钥可用解密出来 echo $decrypted,"\n"; echo "---------------------------------------\n"; echo "public key encrypt:\n"; openssl_public_encrypt($data,$encrypted,$pu_key);//公钥加密 $encrypted = base64_encode($encrypted); echo $encrypted,"\n"; echo "private key decrypt:\n"; openssl_private_decrypt(base64_decode($encrypted),$decrypted,$pi_key);//私钥解密 echo $decrypted,"\n";]]></content>
+      <categories>
+        <category>编程</category>
+        <category>PHP</category>
+      </categories>
+      <tags>
+        <tag>转载</tag>
+        <tag>PHP</tag>
+        <tag>RSA</tag>
+        <tag>加密解析</tag>
+      </tags>
+  </entry>
+</search>
