@@ -6,7 +6,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="http://www.flycmd.com/"/>
-  <updated>2019-06-23T10:58:12.564Z</updated>
+  <updated>2020-07-03T12:06:59.045Z</updated>
   <id>http://www.flycmd.com/</id>
   
   <author>
@@ -15,6 +15,27 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>Laradock使用SSH KEY</title>
+    <link href="http://www.flycmd.com/2020/07/03/Laradock%E4%BD%BF%E7%94%A8SSH-KEY/"/>
+    <id>http://www.flycmd.com/2020/07/03/Laradock使用SSH-KEY/</id>
+    <published>2020-07-03T12:04:04.000Z</published>
+    <updated>2020-07-03T12:06:59.045Z</updated>
+    
+    <content type="html"><![CDATA[<p>.env 配置 <code>WORKSPACE_INSTALL_WORKSPACE_SSH</code> 为 <code>true</code>,然后重新编译,密钥使用的是<code>workspace</code>下的<code>insecure_id_rsa</code>和<code>insecure_id_rsa.pub</code></p>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;p&gt;.env 配置 &lt;code&gt;WORKSPACE_INSTALL_WORKSPACE_SSH&lt;/code&gt; 为 &lt;code&gt;true&lt;/code&gt;,然后重新编译,密钥使用的是&lt;code&gt;workspace&lt;/code&gt;下的&lt;code&gt;insecure_id_rsa&lt;/code
+      
+    
+    </summary>
+    
+    
+  </entry>
   
   <entry>
     <title>Nginx与安全有关的几个配置</title>
@@ -543,33 +564,6 @@
     
     
       <category term="docker" scheme="http://www.flycmd.com/tags/docker/"/>
-    
-  </entry>
-  
-  <entry>
-    <title>Alfred同步配置信息</title>
-    <link href="http://www.flycmd.com/2018/08/28/Alfred%E5%90%8C%E6%AD%A5%E9%85%8D%E7%BD%AE%E4%BF%A1%E6%81%AF/"/>
-    <id>http://www.flycmd.com/2018/08/28/Alfred同步配置信息/</id>
-    <published>2018-08-28T02:37:04.000Z</published>
-    <updated>2018-08-28T02:40:56.943Z</updated>
-    
-    <content type="html"><![CDATA[<h2 id="手动同步"><a href="#手动同步" class="headerlink" title="手动同步"></a>手动同步</h2><p>直接备份 <code>~/Library/Application Support/Alfred 2/Alfred.alfredpreferences</code> 目录,具体路径根据版本不同会有区别</p><h2 id="自动同步-需要开启powerpack"><a href="#自动同步-需要开启powerpack" class="headerlink" title="自动同步(需要开启powerpack)"></a>自动同步(需要开启powerpack)</h2><p>在<code>advanced</code>选项卡下,点击<code>set sync folder...</code>按钮，设置同步目录存放位置即可.</p>]]></content>
-    
-    <summary type="html">
-    
-      
-      
-        &lt;h2 id=&quot;手动同步&quot;&gt;&lt;a href=&quot;#手动同步&quot; class=&quot;headerlink&quot; title=&quot;手动同步&quot;&gt;&lt;/a&gt;手动同步&lt;/h2&gt;&lt;p&gt;直接备份 &lt;code&gt;~/Library/Application Support/Alfred 2/Alfred.alfre
-      
-    
-    </summary>
-    
-      <category term="工具" scheme="http://www.flycmd.com/categories/%E5%B7%A5%E5%85%B7/"/>
-    
-    
-      <category term="Alfred" scheme="http://www.flycmd.com/tags/Alfred/"/>
-    
-      <category term="mac工具" scheme="http://www.flycmd.com/tags/mac%E5%B7%A5%E5%85%B7/"/>
     
   </entry>
   
